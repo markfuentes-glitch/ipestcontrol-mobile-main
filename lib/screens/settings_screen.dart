@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import '../connections/wifi_connection_screen.dart';
 import 'app_information_screen.dart';
+import '../services/rpi_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,16 +17,17 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _isConnectedToWifi = false;
   final Connectivity _connectivity = Connectivity();
   final NetworkInfo _networkInfo = NetworkInfo();
+  final RpiService _rpiService = RpiService();
+  
+  // ✅ FIXED: Expects Single Result
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
   String _wifiName = "";
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
-  // ✨ Matching home screen colors
   static const Color primaryTeal = Color(0xFF00B4A6);
   static const Color primaryIndigo = Color(0xFF6366F1);
-  static const Color softBg = Color(0xFFF8FAFC);
   static const Color cardWhite = Color(0xFFFFFFFF);
   static const Color textDark = Color(0xFF1E293B);
   static const Color textMuted = Color(0xFF64748B);
@@ -38,12 +40,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       duration: const Duration(milliseconds: 600),
       vsync: this,
     );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0). animate(
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _animationController.forward();
     
     _checkWifiConnection();
+    // ✅ FIXED: Listens for Single Result
     _connectivitySubscription = _connectivity.onConnectivityChanged.listen(_updateConnectionStatus);
     
     Timer.periodic(const Duration(seconds: 2), (timer) {
@@ -62,20 +65,24 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  // ✅ FIXED: Expects Single Result
   void _updateConnectionStatus(ConnectivityResult result) {
     _checkWifiConnection();
   }
 
   Future<void> _checkWifiConnection() async {
     try {
-      final connectivityResult = await _connectivity.checkConnectivity();
+      // ✅ FIXED: Check single result
+      var connectivityResult = await _connectivity.checkConnectivity();
       bool isWifi = connectivityResult == ConnectivityResult.wifi;
       
-      String?  wifiName = "";
+      String? wifiName = "";
       try {
-        wifiName = await _networkInfo. getWifiName();
-        if (wifiName != null) {
-          wifiName = wifiName.replaceAll('"', '').replaceAll('<unknown ssid>', '');
+        if (isWifi) {
+          wifiName = await _networkInfo.getWifiName();
+          if (wifiName != null) {
+            wifiName = wifiName.replaceAll('"', '').replaceAll('<unknown ssid>', '');
+          }
         }
       } catch (e) {
         print('Error getting WiFi name: $e');
@@ -86,11 +93,94 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       if (mounted) {
         setState(() {
           _isConnectedToWifi = isConnected;
-          _wifiName = wifiName ??  "";
+          _wifiName = wifiName ?? "";
         });
       }
     } catch (e) {
       print('Error checking connectivity: $e');
+    }
+  }
+
+  // ✅ SHUTDOWN LOGIC
+  Future<void> _confirmShutdown() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.power_settings_new_rounded, color: Colors.red, size: 28),
+              SizedBox(width: 10),
+              // Flexible prevents text overflow
+              Flexible(
+                child: Text('Shutdown System?', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+          content: const Text(
+            'This will turn off the Raspberry Pi completely.\n\nYou will need to manually unplug and replug the power cable to turn it back on.',
+            style: TextStyle(color: textMuted, height: 1.5),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: textMuted, fontWeight: FontWeight.w600),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Shutdown'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sending shutdown command...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // Force connection check if needed
+      if (_rpiService.rpiIpAddress == null) {
+         await _rpiService.scanAndConnect();
+      }
+
+      final success = await _rpiService.shutdownSystem();
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('✅ System is shutting down. Connection closed.'),
+              backgroundColor: Colors.green.shade600,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('❌ Failed to shutdown. Check connection.'),
+              backgroundColor: Colors.red.shade600,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -122,22 +212,20 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 
                 if (_isConnectedToWifi) _buildWifiStatusBanner(),
 
-                // Centered Settings List
                 Expanded(
                   child: Center(
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // WiFi Connection Item
                           _buildSettingsItem(
                             context,
-                            icon: Icons. wifi_rounded,
+                            icon: Icons.wifi_rounded,
                             iconColor: primaryTeal,
                             title: 'WiFi Connection',
                             subtitle: 'Configure network settings',
                             onTap: () {
-                              Navigator. push(
+                              Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => const WiFiConnectionScreen(),
@@ -148,7 +236,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
                           const SizedBox(height: 16),
 
-                          // App Information Item
                           _buildSettingsItem(
                             context,
                             icon: Icons.info_outline_rounded,
@@ -167,7 +254,42 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
                           const SizedBox(height: 32),
 
-                          // Info Tip
+                          // ✅ SHUTDOWN BUTTON
+                          Container(
+                            width: double.infinity,
+                            constraints: const BoxConstraints(maxWidth: 500),
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: _confirmShutdown,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red.shade50,
+                                foregroundColor: Colors.red,
+                                elevation: 0,
+                                shadowColor: Colors.transparent,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(color: Colors.red.withOpacity(0.2)),
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.power_settings_new_rounded),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    'Shutdown System',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 32),
                           _buildInfoTip(),
                         ],
                       ),
@@ -181,8 +303,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       ),
     );
   }
-
-  Widget _buildHeader() {
+  // ... (Keep helper widgets like _buildHeader, _buildWifiStatusBanner, etc.)
+    Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -206,7 +328,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white. withOpacity(0.25),
+              color: Colors.white.withOpacity(0.25),
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
@@ -218,7 +340,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
             child: const Icon(
               Icons.settings_rounded,
-              color: Colors. white,
+              color: Colors.white,
               size: 34,
             ),
           ),
@@ -241,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   'Configure Your App',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors. white,
+                    color: Colors.white,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 0.5,
                   ),
@@ -257,6 +379,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   Widget _buildWifiStatusBanner() {
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
+      constraints: const BoxConstraints(maxWidth: 500),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -283,11 +406,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFF10B981). withOpacity(0.2),
-              shape: BoxShape. circle,
+              color: const Color(0xFF10B981).withOpacity(0.2),
+              shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons. wifi_rounded,
+              Icons.wifi_rounded,
               color: Color(0xFF10B981),
               size: 24,
             ),
@@ -295,7 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           const SizedBox(width: 14),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment. start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
                   'Connected to WiFi',
@@ -375,7 +498,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                // Icon
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -394,8 +516,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   child: Icon(icon, color: iconColor, size: 32),
                 ),
                 const SizedBox(width: 18),
-
-                // Text
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -421,12 +541,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     ],
                   ),
                 ),
-
-                // Arrow
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: iconColor. withOpacity(0.1),
+                    color: iconColor.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(

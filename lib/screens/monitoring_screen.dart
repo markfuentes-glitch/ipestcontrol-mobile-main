@@ -71,7 +71,8 @@ class _MonitoringScreenState extends State<MonitoringScreen>
     });
 
     try {
-      final connectivityResult = await _connectivity.checkConnectivity();
+      // Fix for connectivity_plus v5.0.2 Single Result
+      var connectivityResult = await _connectivity.checkConnectivity();
       bool hasConnection = connectivityResult == ConnectivityResult.wifi;
 
       if (mounted) {
@@ -193,6 +194,20 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   }
 
   Widget _buildHeader() {
+    // Determine color based on connection mode
+    Color statusColor = Colors.grey;
+    IconData statusIcon = Icons.wifi_off_rounded;
+    
+    if (_rpiService.isConnected) {
+      if (_rpiService.connectionMode.contains('Hotspot')) {
+         statusColor = Colors.orangeAccent; // Hotspot = Orange
+         statusIcon = Icons.wifi_tethering;
+      } else {
+         statusColor = Colors.greenAccent; // WiFi = Green
+         statusIcon = Icons.wifi;
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -239,46 +254,38 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                 const Text(
                   'LIVE MONITORING',
                   style: TextStyle(
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                     letterSpacing: 1.0,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: _rpiService.isConnected
-                            ? Colors.greenAccent
-                            : Colors.white54,
-                        shape: BoxShape.circle,
-                        boxShadow: _rpiService.isConnected
-                            ? [
-                                BoxShadow(
-                                  color: Colors.greenAccent.withOpacity(0.5),
-                                  blurRadius: 6,
-                                  spreadRadius: 1,
-                                ),
-                              ]
-                            : [],
+                const SizedBox(height: 6),
+                // ✅ NEW MODE BADGE
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: statusColor.withOpacity(0.5), width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, color: statusColor, size: 12),
+                      const SizedBox(width: 6),
+                      Text(
+                        _rpiService.isConnected 
+                           ? _rpiService.connectionMode 
+                           : 'Offline',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: statusColor, // Use status color for text too
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      _rpiService.isConnected ? 'Connected' : 'Offline',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -311,9 +318,11 @@ class _MonitoringScreenState extends State<MonitoringScreen>
         ],
       ),
     );
-    
   }
- 
+
+  // ... (Keep existing _buildVideoPanel, _buildVideoContent, _buildCompactStats, etc.)
+  // They don't need changes. COPY THEM FROM THE PREVIOUS FILE IF NEEDED.
+  // I will include them below for completeness.
 
   Widget _buildVideoPanel(List detections) {
     return Container(
@@ -510,11 +519,11 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   ) {
     return Container(
       width: double.infinity,
-      height: 156, // ✅ Fixed height
+      height: 156, 
       padding: const EdgeInsets.symmetric(
         horizontal: 14,
         vertical: 10,
-      ), // ✅ Optimized padding
+      ), 
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: cardWhite,
@@ -534,7 +543,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Detection Status Row (60% space)
           Expanded(
             flex: 3,
             child: Row(
@@ -602,7 +610,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
 
           const SizedBox(height: 8),
 
-          // Stats Row (40% space)
           Expanded(
             flex: 2,
             child: Row(
@@ -679,7 +686,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   }
 }
 
-// ==================== DetectionBoxPainter ====================
 class DetectionBoxPainter extends CustomPainter {
   final List detections;
   final Size imageSize;
