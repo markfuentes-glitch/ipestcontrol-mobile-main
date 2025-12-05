@@ -72,6 +72,10 @@ class _MonitoringScreenState extends State<MonitoringScreen>
     });
 
     try {
+<<<<<<< HEAD
+=======
+      // Fix for connectivity_plus v5.0.2 Single Result
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       var connectivityResult = await _connectivity.checkConnectivity();
       bool hasConnection = connectivityResult == ConnectivityResult.wifi;
 
@@ -194,6 +198,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   }
 
   Widget _buildHeader() {
+<<<<<<< HEAD
     Color statusColor = Colors.grey;
     IconData statusIcon = Icons.wifi_off_rounded;
 
@@ -204,6 +209,19 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       } else {
         statusColor = Colors.greenAccent;
         statusIcon = Icons.wifi;
+=======
+    // Determine color based on connection mode
+    Color statusColor = Colors.grey;
+    IconData statusIcon = Icons.wifi_off_rounded;
+    
+    if (_rpiService.isConnected) {
+      if (_rpiService.connectionMode.contains('Hotspot')) {
+         statusColor = Colors.orangeAccent; // Hotspot = Orange
+         statusIcon = Icons.wifi_tethering;
+      } else {
+         statusColor = Colors.greenAccent; // WiFi = Green
+         statusIcon = Icons.wifi;
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       }
     }
 
@@ -260,6 +278,10 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                   ),
                 ),
                 const SizedBox(height: 6),
+<<<<<<< HEAD
+=======
+                // ✅ NEW MODE BADGE
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -273,12 +295,21 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                       Icon(statusIcon, color: statusColor, size: 12),
                       const SizedBox(width: 6),
                       Text(
+<<<<<<< HEAD
                         _rpiService.isConnected
                             ? _rpiService.connectionMode
                             : 'Offline',
                         style: TextStyle(
                           fontSize: 11,
                           color: statusColor,
+=======
+                        _rpiService.isConnected 
+                           ? _rpiService.connectionMode 
+                           : 'Offline',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: statusColor, // Use status color for text too
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -317,6 +348,13 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       ),
     );
   }
+<<<<<<< HEAD
+=======
+
+  // ... (Keep existing _buildVideoPanel, _buildVideoContent, _buildCompactStats, etc.)
+  // They don't need changes. COPY THEM FROM THE PREVIOUS FILE IF NEEDED.
+  // I will include them below for completeness.
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
 
   Widget _buildVideoPanel(List detections) {
     return Container(
@@ -504,11 +542,19 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   ) {
     return Container(
       width: double.infinity,
+<<<<<<< HEAD
       height: 156,
       padding: const EdgeInsets.symmetric(
         horizontal: 14,
         vertical: 10,
       ),
+=======
+      height: 156, 
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 10,
+      ), 
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: cardWhite,
@@ -666,4 +712,69 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       ],
     );
   }
+<<<<<<< HEAD
+=======
+}
+
+class DetectionBoxPainter extends CustomPainter {
+  final List detections;
+  final Size imageSize;
+
+  DetectionBoxPainter({required this.detections, required this.imageSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (detections.isEmpty) return;
+
+    double scaleX = size.width / imageSize.width;
+    double scaleY = size.height / imageSize.height;
+
+    for (var det in detections) {
+      if (det is! Map) continue;
+      var bbox = det['bbox'];
+      if (bbox is List && bbox.length == 4) {
+        double x1 = (bbox[0] ?? 0) * scaleX, y1 = (bbox[1] ?? 0) * scaleY;
+        double x2 = (bbox[2] ?? 0) * scaleX, y2 = (bbox[3] ?? 0) * scaleY;
+
+        bool isHighConf = det['high_confidence'] == true;
+        Paint paint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = isHighConf ? 3.0 : 2.0
+          ..color = isHighConf
+              ? const Color(0xFF10B981)
+              : const Color(0xFFEF4444);
+
+        Rect rect = Rect.fromLTRB(x1, y1, x2, y2);
+        canvas.drawRect(rect, paint);
+
+        String label = det['class'] != null
+            ? '${det['class']} ${(det['confidence'] * 100).toStringAsFixed(1)}%'
+            : '';
+
+        if (label.isNotEmpty) {
+          TextSpan span = TextSpan(
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 11.0,
+              backgroundColor: paint.color.withOpacity(0.8),
+            ),
+            text: ' $label ',
+          );
+          TextPainter tp = TextPainter(
+            text: span,
+            textAlign: TextAlign.left,
+            textDirection: TextDirection.ltr,
+          );
+          tp.layout();
+          Offset textOffset = Offset(max(0, x1), max(0, y1 - tp.height - 3));
+          tp.paint(canvas, textOffset);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
 }

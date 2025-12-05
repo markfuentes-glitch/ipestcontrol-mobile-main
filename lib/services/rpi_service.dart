@@ -26,6 +26,17 @@ class RpiService {
   String? rpiIpAddress;
   bool isConnected = false;
   String connectionMode = 'Offline';
+  static const int CAMERA_PORT = 5000; 
+  static const int MANAGER_PORT = 80;  
+
+  static const String HOTSPOT_SSID = 'IPESTCONTROL';
+  static const String HOTSPOT_IP = '10.42.0.1';
+  static const String HOME_IP = '10.229.150.107'; // Your specific home IP
+  static const String DEVICE_HOSTNAME = 'ipestcontrol'; 
+  
+  String? rpiIpAddress;
+  bool isConnected = false;
+  String connectionMode = 'Offline'; 
   bool _isExplicitlyDisconnected = false;
 
   final _frameController = StreamController<Uint8List>.broadcast();
@@ -44,7 +55,11 @@ class RpiService {
   bool _isScanning = false;
   bool _isDisposed = false;
   http.Client? _streamClient;
+<<<<<<< HEAD
 
+=======
+  
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
   final Connectivity _connectivity = Connectivity();
   final NetworkInfo _networkInfo = NetworkInfo();
 
@@ -57,7 +72,11 @@ class RpiService {
       final response = await http.post(
         Uri.parse('http://$rpiIpAddress:$MANAGER_PORT/shutdown'),
       ).timeout(const Duration(seconds: 3));
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       if (response.statusCode == 200) {
         _addStatus('System Shutting Down...');
         return true;
@@ -68,6 +87,7 @@ class RpiService {
     return false;
   }
 
+<<<<<<< HEAD
   // Send Mode Configuration to Pi
   Future<void> setSystemModes(bool pestMode, bool insectMode) async {
     if (rpiIpAddress == null) return;
@@ -90,11 +110,19 @@ class RpiService {
     if (_isScanning || _isDisposed) return false;
 
     stopStreaming();
+=======
+  // --- CONNECTIVITY ---
+  Future<bool> scanAndConnect() async {
+    if (_isScanning || _isDisposed) return false;
+    
+    stopStreaming(); 
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
     _isScanning = true;
     _isExplicitlyDisconnected = false;
     connectionMode = 'Scanning...';
 
     try {
+<<<<<<< HEAD
       _addStatus('Checking Network...');
 
       String? wifiName;
@@ -134,6 +162,60 @@ class RpiService {
         if (foundIP != null) {
           if (await _tryHandshake(foundIP)) return true;
         }
+=======
+      _addStatus('Scanning networks...');
+
+      String? wifiName;
+      var connectivityResult = await _connectivity.checkConnectivity();
+      
+      if (connectivityResult == ConnectivityResult.wifi) {
+        wifiName = await _networkInfo.getWifiName();
+        wifiName = wifiName?.replaceAll('"', '');
+      }
+      
+      print('📶 Current WiFi SSID: $wifiName');
+
+      // ✅ UNIVERSAL SCAN LIST
+      // We check Hotspot IP first because it's the fastest response if connected
+      List<String> possibleHosts = [
+        HOTSPOT_IP,             // 10.42.0.1 (Priority 1)
+        HOME_IP,                // 10.229.150.107 (Priority 2)
+        DEVICE_HOSTNAME,        // ipestcontrol (Priority 3)
+        '$DEVICE_HOSTNAME.local' // ipestcontrol.local (Priority 4)
+      ];
+      
+      for (var host in possibleHosts) {
+        if (_isDisposed) break;
+        try {
+          print('🔍 Scanning: $host...');
+          final response = await http
+              .get(Uri.parse('http://$host:$CAMERA_PORT/status'))
+              .timeout(const Duration(milliseconds: 5));
+
+          if (response.statusCode == 200) {
+             rpiIpAddress = host;
+             isConnected = true;
+             
+             // ✅ FIXED MODE LOGIC:
+             // 1. If SSID matches IPESTCONTROL -> Hotspot
+             // 2. If connected via 10.42.0.1 -> Hotspot
+             // 3. Otherwise -> WiFi Mode
+             if (wifiName == HOTSPOT_SSID || host == HOTSPOT_IP) {
+                 connectionMode = 'Hotspot Mode';
+             } else {
+                 connectionMode = 'WiFi Mode';
+             }
+             
+             _addStatus('Connected: $connectionMode');
+             print('✅ Connected to $host ($connectionMode)');
+             
+             _startVideoStream();
+             _startMetadataStream();
+             _startBatteryMonitoring();
+             return true;
+          }
+        } catch (e) { continue; }
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       }
 
       _addStatus('Pi not found');
@@ -148,6 +230,7 @@ class RpiService {
     }
   }
 
+<<<<<<< HEAD
   // Helper: Try to connect to a specific IP
   Future<bool> _tryHandshake(String host) async {
     if (_isDisposed) return false;
@@ -209,12 +292,15 @@ class RpiService {
     }
   }
 
+=======
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
   void _addStatus(String status) {
     if (!_isDisposed && !_statusController.isClosed) {
       _statusController.add(status);
     }
   }
 
+<<<<<<< HEAD
   // ----------  WebSocket video  ----------
   void _startWsVideoStream() {
     if (rpiIpAddress == null || _isDisposed) return;
@@ -320,6 +406,68 @@ class RpiService {
       } catch (e) {
         if (!_isExplicitlyDisconnected) _scheduleReconnect();
       }
+=======
+  void _startVideoStream() {
+    if (rpiIpAddress == null || _isDisposed) return;
+    
+    _streamClient?.close();
+    final streamUrl = 'http://$rpiIpAddress:$CAMERA_PORT/video_feed';
+    _streamClient = http.Client();
+    
+    print('📹 Opening video stream...');
+    
+    Future.microtask(() async {
+        try {
+            final request = http.Request('GET', Uri.parse(streamUrl));
+            final response = await _streamClient!.send(request);
+
+            List<int> buffer = [];
+            response.stream.listen((chunk) {
+                if (_isDisposed || _isExplicitlyDisconnected) return;
+                buffer.addAll(chunk);
+                
+                while (buffer.length > 4) {
+                    int startIndex = -1;
+                    for (int i = 0; i < buffer.length - 1; i++) {
+                        if (buffer[i] == 0xFF && buffer[i + 1] == 0xD8) {
+                            startIndex = i;
+                            break;
+                        }
+                    }
+                    if (startIndex == -1) { buffer.clear(); break; }
+                    
+                    int endIndex = -1;
+                    for (int i = startIndex + 2; i < buffer.length - 1; i++) {
+                        if (buffer[i] == 0xFF && buffer[i + 1] == 0xD9) {
+                            endIndex = i + 2;
+                            break;
+                        }
+                    }
+                    if (endIndex == -1) break;
+                    
+                    final frame = Uint8List.fromList(buffer.sublist(startIndex, endIndex));
+                    if (!_isDisposed && !_frameController.isClosed) {
+                        _frameController.add(frame);
+                    }
+                    buffer = buffer.sublist(endIndex);
+                }
+            }, 
+            onError: (e) {
+                if (!_isExplicitlyDisconnected && isConnected) {
+                    print('❌ Stream dropped: $e');
+                    _scheduleReconnect();
+                }
+            },
+            onDone: () {
+                 if (!_isExplicitlyDisconnected && isConnected) {
+                    _scheduleReconnect();
+                 }
+            },
+            cancelOnError: true);
+        } catch (e) {
+             if (!_isExplicitlyDisconnected) _scheduleReconnect();
+        }
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
     });
   }
 
@@ -328,13 +476,22 @@ class RpiService {
     _metadataTimer?.cancel();
     _metadataTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
       if (!isConnected || _isExplicitlyDisconnected) {
+<<<<<<< HEAD
         timer.cancel();
         return;
+=======
+          timer.cancel();
+          return;
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       }
       try {
         final response = await http.get(Uri.parse('http://$rpiIpAddress:$CAMERA_PORT/metadata')).timeout(const Duration(seconds: 1));
         if (response.statusCode == 200) {
+<<<<<<< HEAD
           if (!_isDisposed) _metadataController.add(json.decode(response.body));
+=======
+           if (!_isDisposed) _metadataController.add(json.decode(response.body));
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
         }
       } catch (e) {}
     });
@@ -346,8 +503,13 @@ class RpiService {
     _batteryTimer?.cancel();
     _batteryTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (!isConnected || _isExplicitlyDisconnected) {
+<<<<<<< HEAD
         timer.cancel();
         return;
+=======
+          timer.cancel();
+          return;
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
       }
       _fetchBatteryData();
     });
@@ -355,6 +517,7 @@ class RpiService {
 
   Future<void> _fetchBatteryData() async {
     try {
+<<<<<<< HEAD
       final response = await http
           .get(Uri.parse('http://$rpiIpAddress:$CAMERA_PORT/battery'))
           .timeout(const Duration(seconds: 3));
@@ -373,21 +536,38 @@ class RpiService {
     } catch (e) {
       print("Battery fetch error: $e");
     }
+=======
+      final response = await http.get(Uri.parse('http://$rpiIpAddress:$CAMERA_PORT/battery')).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200 && !_isDisposed) {
+        _batteryController.add(json.decode(response.body));
+      }
+    } catch (e) {}
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
   }
 
   void _scheduleReconnect() {
     if (_isDisposed || _reconnectTimer?.isActive == true || _isExplicitlyDisconnected) return;
+<<<<<<< HEAD
 
     isConnected = false;
     _addStatus('Reconnecting...');
 
     _reconnectTimer = Timer(const Duration(seconds: 3), () {
       if (!_isExplicitlyDisconnected) scanAndConnect();
+=======
+    
+    isConnected = false;
+    _addStatus('Reconnecting...');
+    
+    _reconnectTimer = Timer(const Duration(seconds: 3), () {
+        if (!_isExplicitlyDisconnected) scanAndConnect();
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
     });
   }
 
   void stopStreaming() {
     print('⏸️ Stopping streams...');
+<<<<<<< HEAD
     _isExplicitlyDisconnected = true;
     isConnected = false;
 
@@ -398,6 +578,18 @@ class RpiService {
     _batteryTimer?.cancel();
     _metadataTimer?.cancel();
 
+=======
+    _isExplicitlyDisconnected = true; 
+    isConnected = false;
+    
+    _streamClient?.close();
+    _streamClient = null;
+    
+    _reconnectTimer?.cancel();
+    _batteryTimer?.cancel();
+    _metadataTimer?.cancel();
+    
+>>>>>>> f43b0c6 (modifies rpi, setting, monitoring with shutdown and modes)
     rpiIpAddress = null;
   }
 
