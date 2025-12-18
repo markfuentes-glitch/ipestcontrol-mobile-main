@@ -1,3 +1,4 @@
+// monitoring_screen.dart
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -71,7 +72,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
     });
 
     try {
-      // Fix for connectivity_plus v5.0.2 Single Result
       var connectivityResult = await _connectivity.checkConnectivity();
       bool hasConnection = connectivityResult == ConnectivityResult.wifi;
 
@@ -194,17 +194,16 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   }
 
   Widget _buildHeader() {
-    // Determine color based on connection mode
     Color statusColor = Colors.grey;
     IconData statusIcon = Icons.wifi_off_rounded;
-    
+
     if (_rpiService.isConnected) {
       if (_rpiService.connectionMode.contains('Hotspot')) {
-         statusColor = Colors.orangeAccent; // Hotspot = Orange
-         statusIcon = Icons.wifi_tethering;
+        statusColor = Colors.orangeAccent;
+        statusIcon = Icons.wifi_tethering;
       } else {
-         statusColor = Colors.greenAccent; // WiFi = Green
-         statusIcon = Icons.wifi;
+        statusColor = Colors.greenAccent;
+        statusIcon = Icons.wifi;
       }
     }
 
@@ -261,7 +260,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                   ),
                 ),
                 const SizedBox(height: 6),
-                // ✅ NEW MODE BADGE
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -275,12 +273,12 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                       Icon(statusIcon, color: statusColor, size: 12),
                       const SizedBox(width: 6),
                       Text(
-                        _rpiService.isConnected 
-                           ? _rpiService.connectionMode 
-                           : 'Offline',
+                        _rpiService.isConnected
+                            ? _rpiService.connectionMode
+                            : 'Offline',
                         style: TextStyle(
                           fontSize: 11,
-                          color: statusColor, // Use status color for text too
+                          color: statusColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -320,10 +318,6 @@ class _MonitoringScreenState extends State<MonitoringScreen>
     );
   }
 
-  // ... (Keep existing _buildVideoPanel, _buildVideoContent, _buildCompactStats, etc.)
-  // They don't need changes. COPY THEM FROM THE PREVIOUS FILE IF NEEDED.
-  // I will include them below for completeness.
-
   Widget _buildVideoPanel(List detections) {
     return Container(
       width: double.infinity,
@@ -337,7 +331,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
           BoxShadow(
             color: const Color.fromARGB(255, 117, 117, 235).withOpacity(0.15),
             blurRadius: 10,
-            offset: const Offset(0,5),
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -347,17 +341,8 @@ class _MonitoringScreenState extends State<MonitoringScreen>
           children: [
             _buildVideoContent(),
 
-            if (_rpiService.isConnected &&
-                _currentFrame != null &&
-                detections.isNotEmpty)
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: DetectionBoxPainter(
-                    detections: detections,
-                    imageSize: getImageSize(),
-                  ),
-                ),
-              ),
+            // ✅ REMOVED: Duplicate box painter
+            // Server already draws boxes; metadata is for stats only
 
             if (_rpiService.isConnected && _currentFrame != null)
               Positioned(
@@ -428,7 +413,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
             ),
             const SizedBox(height: 16),
             const Text(
-              'Connecting.. .',
+              'Connecting...',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 12,
@@ -509,7 +494,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       ),
     );
   }
-  
+
   Widget _buildCompactStats(
     bool hasDetection,
     String detectedClass,
@@ -519,18 +504,15 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   ) {
     return Container(
       width: double.infinity,
-      height: 156, 
+      height: 156,
       padding: const EdgeInsets.symmetric(
         horizontal: 14,
         vertical: 10,
-      ), 
+      ),
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: cardWhite,
-        border: Border.all(
-          color: Colors.black,
-          width: 0.01
-        ),
+        border: Border.all(color: Colors.black, width: 0.01),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -684,66 +666,4 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       ],
     );
   }
-}
-
-class DetectionBoxPainter extends CustomPainter {
-  final List detections;
-  final Size imageSize;
-
-  DetectionBoxPainter({required this.detections, required this.imageSize});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (detections.isEmpty) return;
-
-    double scaleX = size.width / imageSize.width;
-    double scaleY = size.height / imageSize.height;
-
-    for (var det in detections) {
-      if (det is! Map) continue;
-      var bbox = det['bbox'];
-      if (bbox is List && bbox.length == 4) {
-        double x1 = (bbox[0] ?? 0) * scaleX, y1 = (bbox[1] ?? 0) * scaleY;
-        double x2 = (bbox[2] ?? 0) * scaleX, y2 = (bbox[3] ?? 0) * scaleY;
-
-        bool isHighConf = det['high_confidence'] == true;
-        Paint paint = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = isHighConf ? 3.0 : 2.0
-          ..color = isHighConf
-              ? const Color(0xFF10B981)
-              : const Color(0xFFEF4444);
-
-        Rect rect = Rect.fromLTRB(x1, y1, x2, y2);
-        canvas.drawRect(rect, paint);
-
-        String label = det['class'] != null
-            ? '${det['class']} ${(det['confidence'] * 100).toStringAsFixed(1)}%'
-            : '';
-
-        if (label.isNotEmpty) {
-          TextSpan span = TextSpan(
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 11.0,
-              backgroundColor: paint.color.withOpacity(0.8),
-            ),
-            text: ' $label ',
-          );
-          TextPainter tp = TextPainter(
-            text: span,
-            textAlign: TextAlign.left,
-            textDirection: TextDirection.ltr,
-          );
-          tp.layout();
-          Offset textOffset = Offset(max(0, x1), max(0, y1 - tp.height - 3));
-          tp.paint(canvas, textOffset);
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
