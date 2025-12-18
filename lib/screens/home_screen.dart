@@ -12,7 +12,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+// ✅ ADDED: WidgetsBindingObserver mixin
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedIndex = 0;
   late PageController _pageController;
   bool _isAnimating = false;
@@ -22,12 +23,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool pestMode = false;
   bool detectionMode = false;
 
-  // Battery data
+  // --- SYSTEM A (Internal UPS) Data ---
   int _batteryPercentage = 0;
   bool _isCharging = false;
   bool _isPowerConnected = false;
 
-  // Battery animations
+  // --- SYSTEM B (External 12V) Data ---
+  int _extPercentage = 0;
+  double _extVoltage = 0.0;
+  bool _extAvailable = false;
+
+  // Battery animations (Internal)
   AnimationController? _pulseController;
   AnimationController? _waveController;
   AnimationController? _boltController;
@@ -47,6 +53,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    // ✅ REGISTER OBSERVER (Detects App Open/Close)
+    WidgetsBinding.instance.addObserver(this);
 
     _pageController = PageController(initialPage: _selectedIndex);
 
@@ -72,26 +80,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       vsync: this,
     );
     _boltAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _boltController!, curve: Curves. elasticOut),
+      CurvedAnimation(parent: _boltController!, curve: Curves.elasticOut),
     );
 
-    // Listen to battery updates
-    _rpiService.batteryStream.listen((batteryData) {
+    // ✅ AUTO-CONNECT ON LAUNCH
+    // This starts the scanning process immediately when the app opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      print("🚀 App Launched: Starting Connection Scan...");
+      _rpiService.scanAndConnect();
+    });
+
+    // Listen to combined battery updates
+    _rpiService.batteryStream.listen((data) {
       if (mounted) {
+        // Parse System A (Internal)
+        final internal = data['internal'];
+        final external = data['external'];
+
         final wasCharging = _isCharging;
+
         setState(() {
-          _batteryPercentage = batteryData['percentage'] ?? 0;
-          _isCharging = batteryData['is_charging'] ?? false;
-          _isPowerConnected = batteryData['power_connected'] ?? false;
+          // System A
+          if (internal != null) {
+            _batteryPercentage = internal['percentage'] ?? 0;
+            _isCharging = internal['is_charging'] ?? false;
+            _isPowerConnected = internal['power_connected'] ?? false;
+          }
+
+          // System B
+          if (external != null) {
+            _extPercentage = external['percent'] ?? 0;
+            _extVoltage = (external['voltage'] ?? 0.0).toDouble();
+            _extAvailable = external['available'] ?? false;
+          }
         });
 
-        // Control animations based on charging state
-        if (_isCharging && ! wasCharging) {
+        // Control animations based on charging state (Internal only)
+        if (_isCharging && !wasCharging) {
           _pulseController?.repeat(reverse: true);
           _boltController?.repeat(reverse: true);
         } else if (!_isCharging && wasCharging) {
-          _pulseController?. stop();
-          _boltController?. stop();
+          _pulseController?.stop();
+          _boltController?.stop();
         }
       }
     });
@@ -99,11 +129,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    // ✅ REMOVE OBSERVER
+    WidgetsBinding.instance.removeObserver(this);
+    
     _pageController.dispose();
     _pulseController?.dispose();
     _waveController?.dispose();
     _boltController?.dispose();
     super.dispose();
+  }
+
+  // ✅ DETECT APP RESUME (Switching back from Settings or background)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print("🚀 App Resumed: Refreshing Connection...");
+      _rpiService.scanAndConnect();
+    }
   }
 
   void _onItemTapped(int index) {
@@ -118,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         .animateToPage(
           index,
           duration: const Duration(milliseconds: 350),
-          curve: Curves. easeInOutCubic,
+          curve: Curves.easeInOutCubic,
         )
         .then((_) {
           if (mounted) {
@@ -129,6 +171,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         });
   }
 
+  // --- HELPERS FOR INTERNAL BATTERY ---
   Color _getBatteryColor() {
     if (_isCharging) return const Color(0xFF3B82F6);
     if (_batteryPercentage > 50) return const Color(0xFF10B981);
@@ -144,7 +187,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   IconData _getBatteryIcon() {
-    if (_isCharging) return Icons. battery_charging_full_rounded;
+    if (_isCharging) return Icons.battery_charging_full_rounded;
     if (_batteryPercentage > 80) return Icons.battery_full_rounded;
     if (_batteryPercentage > 50) return Icons.battery_6_bar_rounded;
     if (_batteryPercentage > 20) return Icons.battery_3_bar_rounded;
@@ -166,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       body: PageView(
         controller: _pageController,
         onPageChanged: (index) {
-          if (! _isAnimating) {
+          if (!_isAnimating) {
             setState(() {
               _selectedIndex = index;
             });
@@ -208,7 +251,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               children: [
                 _buildHeader(),
                 const SizedBox(height: 32),
+                
+                // System A
+                const Padding(
+                  padding: EdgeInsets.only(left: 4, bottom: 8),
+                  child: Text("SYSTEM A (BRAIN)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textMuted)),
+                ),
                 _buildBatteryCard(),
+                
+                const SizedBox(height: 16),
+                
+                // System B
+                const Padding(
+                  padding: EdgeInsets.only(left: 4, bottom: 8),
+                  child: Text("SYSTEM B (MUSCLE)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textMuted)),
+                ),
+                _buildExternalBatteryCard(),
+
                 const SizedBox(height: 32),
                 _buildModeSection(),
               ],
@@ -260,6 +319,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 width: double.infinity,
                 height: double.infinity,
                 fit: BoxFit.cover,
+                errorBuilder: (c,o,s) => const Icon(Icons.pest_control, color: Colors.white, size: 30),
               ),
             ),
           ),
@@ -271,9 +331,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 const Text(
                   'IPESTCONTROL',
                   style: TextStyle(
-                    fontSize: 26,
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: Colors. white,
+                    color: Colors.white,
                     letterSpacing: 1.2,
                   ),
                 ),
@@ -285,10 +345,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
-                    'IOT Pest Management',
+                    'IoT Pest Management',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors. white,
+                      color: Colors.white,
                       fontWeight: FontWeight.w500,
                       letterSpacing: 0.5,
                     ),
@@ -302,20 +362,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // --- INTERNAL BATTERY CARD (SYSTEM A) ---
   Widget _buildBatteryCard() {
     final batteryColor = _getBatteryColor();
     final batteryBgColor = _getBatteryBgColor();
     final batteryIcon = _getBatteryIcon();
 
     if (_pulseAnimation == null) {
-      return const SizedBox. shrink();
+      return const SizedBox.shrink();
     }
 
     return AnimatedBuilder(
       animation: _pulseAnimation!,
       builder: (context, child) {
         return Transform.scale(
-          scale: _isCharging ? _pulseAnimation! .value : 1.0,
+          scale: _isCharging ? _pulseAnimation!.value : 1.0,
           child: Container(
             width: double.infinity,
             decoration: BoxDecoration(
@@ -361,7 +422,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           return CustomPaint(
                             painter: _WavePainter(
                               animation: _waveAnimation!.value,
-                              color: batteryColor. withOpacity(0.08),
+                              color: batteryColor.withOpacity(0.08),
                             ),
                           );
                         },
@@ -386,13 +447,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             // Battery info
                             Expanded(
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment. start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   // Title and status badge
                                   Row(
                                     children: [
                                       const Text(
-                                        'Battery',
+                                        'Pi Power',
                                         style: TextStyle(
                                           fontSize: 16,
                                           color: textMuted,
@@ -401,7 +462,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                         ),
                                       ),
                                       const Spacer(),
-                                      _buildStatusBadge(batteryColor),
+                                      _buildStatusBadge(batteryColor, _getBatteryStatus()),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
@@ -438,7 +499,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                           style: TextStyle(
                                             fontSize: 30,
                                             fontWeight: FontWeight.w600,
-                                            color: batteryColor. withOpacity(0.7),
+                                            color: batteryColor.withOpacity(0.7),
                                           ),
                                         ),
                                       ),
@@ -453,7 +514,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         const SizedBox(height: 20),
 
                         // Progress bar
-                        _buildProgressBar(batteryColor),
+                        _buildProgressBar(batteryColor, _batteryPercentage / 100),
 
                         const SizedBox(height: 16),
 
@@ -476,8 +537,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   ? 'Charging in progress'
                                   : _isPowerConnected
                                       ? 'Fully charged'
-                                      : 'Running on battery',
-                              style: TextStyle(
+                                      : 'Running on UPS',
+                              style: const TextStyle(
                                 fontSize: 13,
                                 color: textMuted,
                                 fontWeight: FontWeight.w500,
@@ -497,13 +558,130 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // --- EXTERNAL BATTERY CARD (SYSTEM B) ---
+  Widget _buildExternalBatteryCard() {
+    // 12V System uses Amber/Orange to signify High Power / "Muscle"
+    Color extColor = _extAvailable ? accentAmber : Colors.grey;
+    Color extBg = _extAvailable ? const Color(0xFFFFF7ED) : const Color(0xFFF1F5F9);
+    
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: extColor.withOpacity(0.15),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Row(
+          children: [
+            // Icon
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: extBg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: extColor.withOpacity(0.3),
+                ),
+              ),
+              child: Icon(
+                _extAvailable ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                color: extColor,
+                size: 32,
+              ),
+            ),
+            const SizedBox(width: 20),
+            
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "12V System",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: textMuted,
+                        ),
+                      ),
+                       _buildStatusBadge(
+                         _extAvailable ? extColor : Colors.grey, 
+                         _extAvailable ? "Active" : "Offline"
+                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  
+                  if (_extAvailable)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          "${_extVoltage.toStringAsFixed(1)}",
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: extColor,
+                          ),
+                        ),
+                        Text(
+                          " V",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: extColor.withOpacity(0.7),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(width: 1, height: 24, color: Colors.grey.withOpacity(0.3)),
+                        const SizedBox(width: 12),
+                        Text(
+                          "$_extPercentage%",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: textDark.withOpacity(0.7),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    const Text(
+                      "Waiting for data...",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBatteryIcon(IconData icon, Color color, Color bgColor) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius. circular(20),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: color.withOpacity(0.3),
           width: 2,
@@ -525,10 +703,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               animation: _boltAnimation!,
               builder: (context, child) {
                 return Transform.scale(
-                  scale: 0.5 + (_boltAnimation! .value * 0.3),
+                  scale: 0.5 + (_boltAnimation!.value * 0.3),
                   child: Icon(
                     Icons.bolt,
-                    color: Colors.amber. shade400,
+                    color: Colors.amber.shade400,
                     size: 28,
                   ),
                 );
@@ -539,7 +717,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStatusBadge(Color color) {
+  Widget _buildStatusBadge(Color color, String text) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -571,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 6),
           Text(
-            _getBatteryStatus(),
+            text,
             style: TextStyle(
               fontSize: 11,
               color: color,
@@ -584,7 +762,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildProgressBar(Color color) {
+  Widget _buildProgressBar(Color color, double value) {
     return Container(
       height: 10,
       decoration: BoxDecoration(
@@ -598,13 +776,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           curve: Curves.easeOutCubic,
           tween: Tween<double>(
             begin: 0,
-            end: _batteryPercentage / 100,
+            end: value,
           ),
-          builder: (context, value, child) {
+          builder: (context, val, child) {
             return Stack(
               children: [
                 FractionallySizedBox(
-                  widthFactor: value,
+                  widthFactor: val.clamp(0.0, 1.0),
                   child: Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -628,7 +806,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     animation: _waveAnimation!,
                     builder: (context, child) {
                       return Positioned(
-                        left: (value * 300) - 80 +
+                        left: (val * 300) - 80 +
                             (math.sin(_waveAnimation!.value) * 15),
                         child: Container(
                           width: 80,
@@ -676,7 +854,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 gradient: const LinearGradient(
                   colors: [primaryTeal, primaryIndigo],
                 ),
-                borderRadius: BorderRadius. circular(12),
+                borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
                     color: primaryIndigo.withOpacity(0.3),
@@ -705,6 +883,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           iconColor: const Color(0xFF8B5A3C),
           onChanged: (v) {
             setState(() => pestMode = v);
+            _rpiService.setSystemModes(pestMode, detectionMode);
           },
         ),
         const SizedBox(height: 16),
@@ -854,7 +1033,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Expanded(
       child: GestureDetector(
         onTap: () => _onItemTapped(index),
-        behavior: HitTestBehavior. opaque,
+        behavior: HitTestBehavior.opaque,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -862,7 +1041,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Icon(
               icon,
               size: 24,
-              color: isSelected ?  Colors.transparent : textMuted. withOpacity(0.6),
+              color: isSelected ?  Colors.transparent : textMuted.withOpacity(0.6),
             ),
             const SizedBox(height: 4),
             Text(
@@ -886,7 +1065,7 @@ class _WavePainter extends CustomPainter {
   final double animation;
   final Color color;
 
-  _WavePainter({required this.animation, required this. color});
+  _WavePainter({required this.animation, required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
